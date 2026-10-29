@@ -1,0 +1,1186 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3D 1·2·3 특수 주사위</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Three.js (3D Graphics) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Cannon.js (3D Physics) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+
+    <style>
+        * {
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0f172a;
+        }
+        #canvas-container {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            cursor: grab;
+        }
+        #canvas-container:active {
+            cursor: grabbing;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        .roll-btn {
+            background: linear-gradient(135deg, #6366f1 0%, #4f46e5 50%, #4338ca 100%);
+            box-shadow: 0 10px 25px -5px rgba(79, 70, 229, 0.6), inset 0 2px 2px rgba(255, 255, 255, 0.3);
+            transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .roll-btn:hover:not(:disabled) {
+            transform: translateY(-2px) scale(1.02);
+            box-shadow: 0 15px 30px -5px rgba(79, 70, 229, 0.75), inset 0 2px 2px rgba(255, 255, 255, 0.4);
+        }
+        .roll-btn:active:not(:disabled) {
+            transform: translateY(1px) scale(0.98);
+        }
+        .roll-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        @keyframes popIn {
+            0% { transform: scale(0.6); opacity: 0; }
+            70% { transform: scale(1.08); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .animate-pop {
+            animation: popIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 5px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.4);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(148, 163, 184, 0.3);
+            border-radius: 9999px;
+        }
+    </style>
+</head>
+<body class="text-slate-100 relative">
+
+    <!-- 3D Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <!-- Top Navigation & Options Bar -->
+    <header class="relative z-10 pointer-events-none p-3 sm:p-5 flex flex-wrap items-center justify-between gap-3">
+        <!-- Brand / Title -->
+        <div class="glass-panel pointer-events-auto px-4 py-2.5 rounded-2xl flex items-center gap-3 shadow-lg">
+            <div class="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-indigo-400 text-xl font-extrabold">
+                <i class="fa-solid fa-dice-three"></i>
+            </div>
+            <div>
+                <div class="flex items-center gap-2">
+                    <h1 class="font-extrabold text-base sm:text-lg tracking-tight text-white">1·2·3 3D 주사위</h1>
+                    <span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/30 text-indigo-200 border border-indigo-400/30">각 2면</span>
+                </div>
+                <p class="text-xs text-slate-400 hidden sm:block">마우스 드래그로 카메라 각도를 회전할 수 있습니다</p>
+            </div>
+        </div>
+
+        <!-- Quick Settings Controls -->
+        <div class="glass-panel pointer-events-auto p-1.5 rounded-2xl flex items-center gap-1.5 shadow-lg">
+            <!-- Face Style Toggle (Pips vs Numbers) -->
+            <button id="style-toggle-btn" class="px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-slate-800/80 hover:bg-slate-700/80 text-slate-200 transition flex items-center gap-2 border border-slate-700/60" title="주사위 눈 표시 방식 변경">
+                <i class="fa-solid fa-circle-dot text-rose-400" id="style-icon"></i>
+                <span id="style-label">점(Pip) 모드</span>
+            </button>
+
+            <!-- Color Theme Toggle -->
+            <button id="theme-toggle-btn" class="px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-slate-800/80 hover:bg-slate-700/80 text-slate-200 transition flex items-center gap-2 border border-slate-700/60" title="주사위 테마 변경">
+                <i class="fa-solid fa-palette text-amber-400"></i>
+                <span id="theme-label">클래식 화이트</span>
+            </button>
+
+            <!-- Sound Toggle -->
+            <button id="sound-toggle-btn" class="w-9 h-9 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-slate-200 transition flex items-center justify-center border border-slate-700/60" title="효과음 켜기/끄기">
+                <i class="fa-solid fa-volume-high text-emerald-400" id="sound-icon"></i>
+            </button>
+
+            <!-- Stats Modal / Drawer Toggle (Mobile & Desktop) -->
+            <button id="stats-toggle-btn" class="px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 transition flex items-center gap-1.5 border border-indigo-400/30">
+                <i class="fa-solid fa-chart-simple"></i>
+                <span class="hidden sm:inline">기록/통계</span>
+            </button>
+
+            <!-- Direct HTML File Download Button -->
+            <button id="download-html-btn" class="px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-200 transition flex items-center gap-1.5 border border-emerald-400/30" title="독립 실행 가능한 index.html 파일 다운로드">
+                <i class="fa-solid fa-download"></i>
+                <span class="hidden sm:inline">HTML 저장</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Center Result Display Banner -->
+    <div class="relative z-10 pointer-events-none flex flex-col items-center justify-center mt-1 sm:mt-2 px-4">
+        <div id="result-banner" class="glass-panel px-6 py-4 rounded-3xl shadow-2xl border border-indigo-500/30 flex flex-col items-center min-w-[240px] sm:min-w-[300px] transition-all duration-300">
+            <span id="result-status" class="text-xs font-semibold uppercase tracking-widest text-indigo-300 mb-1">주사위 결과</span>
+            
+            <!-- Big Total / Main Number -->
+            <div class="flex items-baseline gap-2 my-0.5">
+                <span id="result-total" class="text-5xl sm:text-6xl font-black text-white tracking-tight drop-shadow">?</span>
+                <span id="result-unit" class="text-sm font-bold text-slate-400 hidden">합계</span>
+            </div>
+
+            <!-- Individual Dice Badges -->
+            <div id="individual-results" class="flex flex-wrap items-center justify-center gap-2 mt-2 min-h-[28px]">
+                <span class="text-xs text-slate-400">아래 버튼을 눌러 주사위를 굴려보세요!</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Collapsible Side Panel: Face Info + Roll History & Statistics -->
+    <aside id="stats-panel" class="fixed right-4 top-20 bottom-28 w-80 max-w-[calc(100vw-2rem)] glass-panel rounded-3xl p-4 z-20 shadow-2xl flex flex-col gap-4 transition-all duration-300 translate-x-[120%] opacity-0 pointer-events-none">
+        <div class="flex items-center justify-between border-b border-slate-700/60 pb-3">
+            <h2 class="font-bold text-sm flex items-center gap-2 text-white">
+                <i class="fa-solid fa-chart-pie text-indigo-400"></i>
+                주사위 구성 및 통계
+            </h2>
+            <button id="close-stats-btn" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+
+        <!-- 6-Face Net Visualization -->
+        <div class="bg-slate-900/70 rounded-2xl p-3 border border-slate-800">
+            <div class="text-xs font-semibold text-slate-400 mb-2 flex items-center justify-between">
+                <span>6면 전개도 (마주보는 면 동일)</span>
+                <span class="text-[11px] text-indigo-300">확률 각 33.3%</span>
+            </div>
+            <div class="grid grid-cols-3 gap-1.5 text-center text-xs font-bold">
+                <div class="p-2 rounded-lg bg-rose-500/20 border border-rose-500/40 text-rose-300">
+                    <div class="text-base font-black">1</div>
+                    <div class="text-[10px] opacity-80">좌 · 우 (2면)</div>
+                </div>
+                <div class="p-2 rounded-lg bg-sky-500/20 border border-sky-500/40 text-sky-300">
+                    <div class="text-base font-black">2</div>
+                    <div class="text-[10px] opacity-80">상 · 하 (2면)</div>
+                </div>
+                <div class="p-2 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300">
+                    <div class="text-base font-black">3</div>
+                    <div class="text-[10px] opacity-80">전 · 후 (2면)</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Frequency Bars -->
+        <div class="bg-slate-900/70 rounded-2xl p-3 border border-slate-800 space-y-2">
+            <div class="flex items-center justify-between text-xs font-semibold text-slate-400">
+                <span>눈금별 출현 빈도</span>
+                <span id="total-dice-rolled" class="text-slate-300">총 0회</span>
+            </div>
+            <!-- 1 Count -->
+            <div class="space-y-1">
+                <div class="flex justify-between text-xs">
+                    <span class="font-bold text-rose-300">눈금 1</span>
+                    <span id="stat-count-1" class="text-slate-400">0회 (0%)</span>
+                </div>
+                <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                    <div id="stat-bar-1" class="h-full bg-rose-500 transition-all duration-300" style="width: 0%"></div>
+                </div>
+            </div>
+            <!-- 2 Count -->
+            <div class="space-y-1">
+                <div class="flex justify-between text-xs">
+                    <span class="font-bold text-sky-300">눈금 2</span>
+                    <span id="stat-count-2" class="text-slate-400">0회 (0%)</span>
+                </div>
+                <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                    <div id="stat-bar-2" class="h-full bg-sky-500 transition-all duration-300" style="width: 0%"></div>
+                </div>
+            </div>
+            <!-- 3 Count -->
+            <div class="space-y-1">
+                <div class="flex justify-between text-xs">
+                    <span class="font-bold text-emerald-300">눈금 3</span>
+                    <span id="stat-count-3" class="text-slate-400">0회 (0%)</span>
+                </div>
+                <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                    <div id="stat-bar-3" class="h-full bg-emerald-500 transition-all duration-300" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Roll History List -->
+        <div class="flex-1 flex flex-col min-h-0">
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-xs font-semibold text-slate-400">최근 기록</span>
+                <button id="clear-history-btn" class="text-xs text-slate-400 hover:text-rose-400 transition">초기화</button>
+            </div>
+            <div id="history-list" class="flex-1 overflow-y-auto space-y-1.5 pr-1 text-xs">
+                <div class="text-slate-500 text-center py-6">아직 기록이 없습니다.</div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Bottom Controls Dock -->
+    <footer class="fixed bottom-0 inset-x-0 z-10 pointer-events-none p-4 sm:p-6 flex flex-col items-center justify-end">
+        <div class="glass-panel pointer-events-auto p-3 sm:p-4 rounded-3xl shadow-2xl flex flex-col sm:flex-row items-center gap-3 sm:gap-5 w-full max-w-xl border border-slate-700/80">
+            
+            <!-- Number of Dice Selector -->
+            <div class="flex items-center justify-between sm:justify-start w-full sm:w-auto gap-2 bg-slate-900/80 p-1.5 rounded-2xl border border-slate-800">
+                <span class="text-xs font-bold text-slate-400 px-2.5 whitespace-nowrap">주사위 개수</span>
+                <div class="flex items-center gap-1" id="dice-count-group">
+                    <button data-count="1" class="dice-count-btn w-9 h-9 rounded-xl font-extrabold text-sm transition bg-indigo-600 text-white shadow">1</button>
+                    <button data-count="2" class="dice-count-btn w-9 h-9 rounded-xl font-extrabold text-sm transition text-slate-400 hover:text-white hover:bg-slate-800">2</button>
+                    <button data-count="3" class="dice-count-btn w-9 h-9 rounded-xl font-extrabold text-sm transition text-slate-400 hover:text-white hover:bg-slate-800">3</button>
+                    <button data-count="4" class="dice-count-btn w-9 h-9 rounded-xl font-extrabold text-sm transition text-slate-400 hover:text-white hover:bg-slate-800">4</button>
+                    <button data-count="5" class="dice-count-btn w-9 h-9 rounded-xl font-extrabold text-sm transition text-slate-400 hover:text-white hover:bg-slate-800">5</button>
+                </div>
+            </div>
+
+            <!-- Roll Action Button -->
+            <button id="roll-btn" class="roll-btn w-full sm:flex-1 py-3.5 px-6 rounded-2xl font-extrabold text-base sm:text-lg text-white flex items-center justify-center gap-3">
+                <i class="fa-solid fa-dice text-xl"></i>
+                <span>주사위 굴리기</span>
+                <span class="hidden md:inline-block text-[11px] font-semibold px-2 py-0.5 rounded-md bg-black/25 text-indigo-100">SPACE</span>
+            </button>
+
+            <!-- Reset Camera Button -->
+            <button id="reset-cam-btn" class="hidden sm:flex w-11 h-11 rounded-2xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 items-center justify-center transition border border-slate-700" title="카메라 시점 초기화">
+                <i class="fa-solid fa-video"></i>
+            </button>
+        </div>
+    </footer>
+
+    <script>
+        /**
+         * 3D 1-2-3 Special Dice Application
+         * - Faces have only values 1, 2, and 3 (2 faces for each value).
+         * - Opposite faces match (+X/-X = 1, +Y/-Y = 2, +Z/-Z = 3) for fair symmetry.
+         * - Built with Three.js (r128) & Cannon.js (0.6.2).
+         */
+
+        // --- App State ---
+        const state = {
+            diceCount: 1,
+            isRolling: false,
+            faceMode: 'pips', // 'pips' | 'numbers'
+            themeIndex: 0,
+            soundEnabled: true,
+            rollCount: 0,
+            stats: { 1: 0, 2: 0, 3: 0 },
+            history: []
+        };
+
+        const THEMES = [
+            {
+                name: '클래식 화이트',
+                bg: '#ffffff',
+                border: '#cbd5e1',
+                pip1: '#e11d48', // Traditional bright red for 1
+                pip2: '#1e293b',
+                pip3: '#0f172a',
+                subText: '#94a3b8'
+            },
+            {
+                name: '네온 다크',
+                bg: '#1e1b4b',
+                border: '#4338ca',
+                pip1: '#fb7185',
+                pip2: '#38bdf8',
+                pip3: '#34d399',
+                subText: '#6366f1'
+            },
+            {
+                name: '로얄 골드',
+                bg: '#fef3c7',
+                border: '#f59e0b',
+                pip1: '#dc2626',
+                pip2: '#92400e',
+                pip3: '#78350f',
+                subText: '#d97706'
+            }
+        ];
+
+        // Local face normal vectors corresponding to Three.js BoxGeometry material indices:
+        // Index 0: +X (Right) -> 1
+        // Index 1: -X (Left)  -> 1
+        // Index 2: +Y (Top)   -> 2
+        // Index 3: -Y (Bottom)-> 2
+        // Index 4: +Z (Front) -> 3
+        // Index 5: -Z (Back)  -> 3
+        const FACE_VALUES = [1, 1, 2, 2, 3, 3];
+        const FACE_NORMALS = [
+            { normal: new THREE.Vector3(1, 0, 0), value: 1 },
+            { normal: new THREE.Vector3(-1, 0, 0), value: 1 },
+            { normal: new THREE.Vector3(0, 1, 0), value: 2 },
+            { normal: new THREE.Vector3(0, -1, 0), value: 2 },
+            { normal: new THREE.Vector3(0, 0, 1), value: 3 },
+            { normal: new THREE.Vector3(0, 0, -1), value: 3 }
+        ];
+
+        // --- Web Audio Synthesizer (Zero External Assets) ---
+        let audioCtx = null;
+        function initAudio() {
+            if (!audioCtx) {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                if (AudioContextClass) {
+                    audioCtx = new AudioContextClass();
+                }
+            }
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function playHitSound(impactStrength = 1) {
+            if (!state.soundEnabled || !audioCtx) return;
+            try {
+                const now = audioCtx.currentTime;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+
+                // Pitch varies slightly for natural wood/resin clack
+                const baseFreq = 180 + Math.random() * 140;
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(baseFreq, now);
+                osc.frequency.exponentialRampToValueAtTime(45, now + 0.045);
+
+                const volume = Math.min(Math.max(impactStrength * 0.035, 0.02), 0.35);
+                gain.gain.setValueAtTime(volume, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.045);
+
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start(now);
+                osc.stop(now + 0.05);
+            } catch (e) {
+                // Ignore audio context errors on restricted devices
+            }
+        }
+
+        function playSuccessChime() {
+            if (!state.soundEnabled || !audioCtx) return;
+            try {
+                const now = audioCtx.currentTime;
+                const notes = [523.25, 659.25, 783.99]; // C5, E5, G5
+                notes.forEach((freq, idx) => {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(freq, now + idx * 0.06);
+
+                    gain.gain.setValueAtTime(0.08, now + idx * 0.06);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.06 + 0.25);
+
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start(now + idx * 0.06);
+                    osc.stop(now + idx * 0.06 + 0.26);
+                });
+            } catch (e) {}
+        }
+
+        // --- Three.js & Cannon.js Variables ---
+        let scene, camera, renderer, world;
+        let diceObjects = []; // Array of { mesh, body, lastSoundTime }
+        let diceMaterials = [];
+        let rollStartTime = 0;
+        let settleCheckTimer = null;
+
+        // Camera Orbit Controls State
+        const camControl = {
+            isDragging: false,
+            prevX: 0,
+            prevY: 0,
+            theta: 0,           // Horizontal angle
+            phi: 0.92,          // Vertical angle (radians from top)
+            radius: 17.5,       // Distance from center
+            targetTheta: 0,
+            targetPhi: 0.92
+        };
+
+        // --- Dynamic Canvas Texture Generator for Faces 1, 2, 3 ---
+        function createFaceTexture(value) {
+            const canvas = document.createElement('canvas');
+            const size = 512;
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            const theme = THEMES[state.themeIndex];
+
+            // 1. Face Background
+            ctx.fillStyle = theme.border;
+            ctx.fillRect(0, 0, size, size);
+
+            // Inner rounded square for beveled look
+            const pad = 18;
+            const radius = 64;
+            ctx.fillStyle = theme.bg;
+            roundRect(ctx, pad, pad, size - pad * 2, size - pad * 2, radius);
+            ctx.fill();
+
+            // Subtle inner shadow border
+            ctx.strokeStyle = theme.border;
+            ctx.lineWidth = 6;
+            ctx.stroke();
+
+            // Color selection based on value
+            const mainColor = value === 1 ? theme.pip1 : (value === 2 ? theme.pip2 : theme.pip3);
+
+            if (state.faceMode === 'pips') {
+                // Draw Pips (Dots)
+                ctx.fillStyle = mainColor;
+                const center = size / 2;
+                const offset = 128;
+
+                if (value === 1) {
+                    // Large central pip for 1
+                    drawPip(ctx, center, center, 68, mainColor);
+                } else if (value === 2) {
+                    // 2 diagonal pips
+                    drawPip(ctx, center - offset, center - offset, 46, mainColor);
+                    drawPip(ctx, center + offset, center + offset, 46, mainColor);
+                } else if (value === 3) {
+                    // 3 diagonal pips
+                    drawPip(ctx, center - offset, center - offset, 44, mainColor);
+                    drawPip(ctx, center, center, 44, mainColor);
+                    drawPip(ctx, center + offset, center + offset, 44, mainColor);
+                }
+
+                // Small corner numeric indicator for clarity
+                ctx.fillStyle = theme.subText;
+                ctx.font = '800 44px Pretendard, sans-serif';
+                ctx.textAlign = 'right';
+                ctx.textBaseline = 'bottom';
+                ctx.fillText(String(value), size - 44, size - 38);
+            } else {
+                // Draw Large Number Mode
+                ctx.fillStyle = mainColor;
+                ctx.font = '900 260px Pretendard, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(String(value), size / 2, size / 2 + 12);
+
+                // Underline bar to indicate orientation
+                ctx.fillRect(size / 2 - 55, size / 2 + 135, 110, 14);
+            }
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.anisotropy = 4;
+            texture.needsUpdate = true;
+            return texture;
+        }
+
+        function drawPip(ctx, x, y, r, color) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, Math.PI * 2);
+            ctx.fillStyle = color;
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.25)';
+            ctx.shadowBlur = 10;
+            ctx.shadowOffsetY = 4;
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function roundRect(ctx, x, y, w, h, r) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.arcTo(x + w, y, x + w, y + h, r);
+            ctx.arcTo(x + w, y + h, x, y + h, r);
+            ctx.arcTo(x, y + h, x, y, r);
+            ctx.arcTo(x, y, x + w, y, r);
+            ctx.closePath();
+        }
+
+        function buildDiceMaterials() {
+            // Create textures for 1, 2, 3 and map them to the 6 faces
+            const texMap = {
+                1: createFaceTexture(1),
+                2: createFaceTexture(2),
+                3: createFaceTexture(3)
+            };
+
+            diceMaterials = FACE_VALUES.map(val => new THREE.MeshStandardMaterial({
+                map: texMap[val],
+                roughness: 0.25,
+                metalness: 0.05
+            }));
+
+            // Update existing dice meshes
+            diceObjects.forEach(obj => {
+                obj.mesh.material = diceMaterials;
+            });
+        }
+
+        // --- Initialize 3D Scene & Physics World ---
+        function init3D() {
+            const container = document.getElementById('canvas-container');
+            container.innerHTML = '';
+
+            // 1. Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0f172a);
+            scene.fog = new THREE.FogExp2(0x0f172a, 0.018);
+
+            // 2. Camera
+            camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 100);
+            updateCameraPosition();
+
+            // 3. Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            // 4. Lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
+            dirLight.position.set(10, 22, 12);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            dirLight.shadow.camera.near = 5;
+            dirLight.shadow.camera.far = 45;
+            const d = 11;
+            dirLight.shadow.camera.left = -d;
+            dirLight.shadow.camera.right = d;
+            dirLight.shadow.camera.top = d;
+            dirLight.shadow.camera.bottom = -d;
+            dirLight.shadow.bias = -0.0005;
+            scene.add(dirLight);
+
+            const pointLight = new THREE.PointLight(0x6366f1, 0.5, 30);
+            pointLight.position.set(-10, 10, -10);
+            scene.add(pointLight);
+
+            // 5. Physics World (Cannon.js)
+            world = new CANNON.World();
+            world.gravity.set(0, -45, 0);
+            world.broadphase = new CANNON.NaiveBroadphase();
+            world.solver.iterations = 16;
+
+            const floorPhysMat = new CANNON.Material('floorMaterial');
+            const dicePhysMat = new CANNON.Material('diceMaterial');
+            const contactMat = new CANNON.ContactMaterial(floorPhysMat, dicePhysMat, {
+                friction: 0.3,
+                restitution: 0.42
+            });
+            world.addContactMaterial(contactMat);
+
+            const diceDiceContact = new CANNON.ContactMaterial(dicePhysMat, dicePhysMat, {
+                friction: 0.2,
+                restitution: 0.55
+            });
+            world.addContactMaterial(diceDiceContact);
+
+            // 6. Visual & Physical Tray / Board
+            createArena(floorPhysMat);
+
+            // 7. Build Initial Dice Materials & Spawn Dice
+            buildDiceMaterials();
+            spawnDice(state.diceCount, dicePhysMat);
+
+            // 8. Setup Camera & Resize Events
+            setupInteractionEvents(container);
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function createArena(floorPhysMat) {
+            // Circular/Octagonal Board Table
+            const trayRadius = 9.5;
+            const floorGeo = new THREE.CylinderGeometry(trayRadius, trayRadius + 0.5, 0.6, 64);
+            const floorMat = new THREE.MeshStandardMaterial({
+                color: 0x1e293b,
+                roughness: 0.8,
+                metalness: 0.1
+            });
+            const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+            floorMesh.position.y = -0.3;
+            floorMesh.receiveShadow = true;
+            scene.add(floorMesh);
+
+            // Subtle Decorative Ring on the Board
+            const ringGeo = new THREE.RingGeometry(trayRadius - 1.2, trayRadius - 1.05, 64);
+            const ringMat = new THREE.MeshBasicMaterial({
+                color: 0x6366f1,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.35
+            });
+            const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+            ringMesh.rotation.x = -Math.PI / 2;
+            ringMesh.position.y = 0.01;
+            scene.add(ringMesh);
+
+            // Outer Rim Visual
+            const rimGeo = new THREE.TorusGeometry(trayRadius - 0.2, 0.35, 16, 64);
+            const rimMat = new THREE.MeshStandardMaterial({
+                color: 0x334155,
+                roughness: 0.4,
+                metalness: 0.3
+            });
+            const rimMesh = new THREE.Mesh(rimGeo, rimMat);
+            rimMesh.rotation.x = -Math.PI / 2;
+            rimMesh.position.y = 0.25;
+            rimMesh.receiveShadow = true;
+            rimMesh.castShadow = true;
+            scene.add(rimMesh);
+
+            // Physics Ground Plane
+            const groundBody = new CANNON.Body({
+                mass: 0,
+                shape: new CANNON.Plane(),
+                material: floorPhysMat
+            });
+            groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+            world.addBody(groundBody);
+
+            // Invisible Physics Walls around the tray to keep dice inside
+            const wallCount = 12;
+            const wallDist = trayRadius - 1.1;
+            for (let i = 0; i < wallCount; i++) {
+                const angle = (i / wallCount) * Math.PI * 2;
+                const wallBody = new CANNON.Body({
+                    mass: 0,
+                    shape: new CANNON.Box(new CANNON.Vec3(3.5, 8, 0.5)),
+                    material: floorPhysMat
+                });
+                wallBody.position.set(
+                    Math.sin(angle) * wallDist,
+                    4,
+                    Math.cos(angle) * wallDist
+                );
+                wallBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), angle);
+                world.addBody(wallBody);
+            }
+        }
+
+        // --- Spawn Dice Entities ---
+        let cachedDicePhysMat = null;
+        function spawnDice(count, physMat) {
+            if (physMat) cachedDicePhysMat = physMat;
+
+            // Remove existing dice
+            diceObjects.forEach(obj => {
+                scene.remove(obj.mesh);
+                world.remove(obj.body);
+            });
+            diceObjects = [];
+
+            const size = 1.75; // Cube edge length
+            const boxGeo = new THREE.BoxGeometry(size, size, size);
+            const halfExtents = new CANNON.Vec3(size / 2, size / 2, size / 2);
+            const boxShape = new CANNON.Box(halfExtents);
+
+            // Arrange initial positions neatly
+            const spacing = 2.4;
+            const startX = -((count - 1) * spacing) / 2;
+
+            for (let i = 0; i < count; i++) {
+                const mesh = new THREE.Mesh(boxGeo, diceMaterials);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+
+                const x = startX + i * spacing;
+                const y = size / 2;
+                const z = 0;
+                mesh.position.set(x, y, z);
+                scene.add(mesh);
+
+                const body = new CANNON.Body({
+                    mass: 1.2,
+                    shape: boxShape,
+                    material: cachedDicePhysMat,
+                    linearDamping: 0.15,
+                    angularDamping: 0.15
+                });
+                body.position.set(x, y, z);
+
+                const dieObj = { mesh, body, lastSoundTime: 0 };
+
+                // Collision sound callback
+                body.addEventListener('collide', (event) => {
+                    const now = performance.now();
+                    if (now - dieObj.lastSoundTime > 55) {
+                        const relVel = Math.abs(event.contact.getImpactVelocityAlongNormal());
+                        if (relVel > 1.8) {
+                            playHitSound(relVel);
+                            dieObj.lastSoundTime = now;
+                        }
+                    }
+                });
+
+                world.addBody(body);
+                diceObjects.push(dieObj);
+            }
+        }
+
+        // --- Roll the Dice with Physics Impulse & Torque ---
+        function rollDice() {
+            if (state.isRolling) return;
+            initAudio();
+
+            state.isRolling = true;
+            rollStartTime = performance.now();
+
+            const rollBtn = document.getElementById('roll-btn');
+            rollBtn.disabled = true;
+
+            // Update UI Banner to rolling state
+            document.getElementById('result-status').textContent = '주사위 굴리는 중...';
+            document.getElementById('result-total').textContent = '🎲';
+            document.getElementById('result-unit').classList.add('hidden');
+            document.getElementById('individual-results').innerHTML =
+                '<span class="text-xs text-indigo-300 animate-pulse">결과를 기다리고 있습니다...</span>';
+
+            const count = diceObjects.length;
+            const radiusSpread = count === 1 ? 0 : 2.3;
+
+            diceObjects.forEach((obj, idx) => {
+                const angle = (idx / count) * Math.PI * 2 + Math.random() * 0.5;
+                const startX = Math.cos(angle) * radiusSpread + (Math.random() - 0.5) * 1.2;
+                const startZ = Math.sin(angle) * radiusSpread + (Math.random() - 0.5) * 1.2;
+                const startY = 5.5 + idx * 0.8 + Math.random() * 1.5;
+
+                // Reset position high above board
+                obj.body.position.set(startX, startY, startZ);
+                obj.body.velocity.setZero();
+                obj.body.angularVelocity.setZero();
+
+                // Random starting orientation
+                const q = new THREE.Quaternion().setFromEuler(
+                    new THREE.Euler(
+                        Math.random() * Math.PI * 2,
+                        Math.random() * Math.PI * 2,
+                        Math.random() * Math.PI * 2
+                    )
+                );
+                obj.body.quaternion.set(q.x, q.y, q.z, q.w);
+
+                // Throw slightly inward with random impulse
+                const vx = -startX * 1.8 + (Math.random() - 0.5) * 8;
+                const vy = -4 - Math.random() * 5;
+                const vz = -startZ * 1.8 + (Math.random() - 0.5) * 8;
+                obj.body.velocity.set(vx, vy, vz);
+
+                // Strong angular velocity for realistic tumbling
+                const ax = (Math.random() - 0.5) * 38;
+                const ay = (Math.random() - 0.5) * 38;
+                const az = (Math.random() - 0.5) * 38;
+                obj.body.angularVelocity.set(ax, ay, az);
+                obj.body.wakeUp();
+            });
+        }
+
+        // --- Determine Top Face Value of a Die ---
+        function getTopFaceValue(mesh) {
+            let bestValue = 1;
+            let maxDot = -Infinity;
+
+            for (let i = 0; i < FACE_NORMALS.length; i++) {
+                const worldNormal = FACE_NORMALS[i].normal.clone().applyQuaternion(mesh.quaternion);
+                // Compare with world +Y axis (0, 1, 0), which is simply worldNormal.y
+                if (worldNormal.y > maxDot) {
+                    maxDot = worldNormal.y;
+                    bestValue = FACE_NORMALS[i].value;
+                }
+            }
+            return bestValue;
+        }
+
+        // --- Check if All Dice Have Settled ---
+        function checkDiceSettled() {
+            if (!state.isRolling) return;
+
+            const elapsed = performance.now() - rollStartTime;
+            // Minimum roll time of 450ms so initial launch isn't flagged as settled
+            if (elapsed < 450) return;
+
+            let allStopped = true;
+            for (let i = 0; i < diceObjects.length; i++) {
+                const b = diceObjects[i].body;
+                const vLen = b.velocity.lengthSquared();
+                const wLen = b.angularVelocity.lengthSquared();
+                if (vLen > 0.03 || wLen > 0.05 || b.position.y > 2.2) {
+                    allStopped = false;
+                    break;
+                }
+            }
+
+            // Force finish if rolling takes longer than 3.6 seconds
+            if (allStopped || elapsed > 3600) {
+                finalizeRoll();
+            }
+        }
+
+        function finalizeRoll() {
+            state.isRolling = false;
+            document.getElementById('roll-btn').disabled = false;
+
+            const values = diceObjects.map(obj => getTopFaceValue(obj.mesh));
+            const sum = values.reduce((a, b) => a + b, 0);
+
+            playSuccessChime();
+            updateResultUI(values, sum);
+            recordRollStats(values, sum);
+        }
+
+        // --- Update Result Banner & Stats UI ---
+        function updateResultUI(values, sum) {
+            const statusEl = document.getElementById('result-status');
+            const totalEl = document.getElementById('result-total');
+            const unitEl = document.getElementById('result-unit');
+            const indivEl = document.getElementById('individual-results');
+
+            statusEl.textContent = `굴리기 완료 (#${state.rollCount + 1})`;
+            totalEl.textContent = sum;
+
+            // Trigger pop animation
+            totalEl.classList.remove('animate-pop');
+            void totalEl.offsetWidth;
+            totalEl.classList.add('animate-pop');
+
+            if (values.length > 1) {
+                unitEl.classList.remove('hidden');
+            } else {
+                unitEl.classList.add('hidden');
+            }
+
+            // Badge colors per value (1, 2, 3)
+            const badgeColors = {
+                1: 'bg-rose-500/25 border-rose-400/50 text-rose-200',
+                2: 'bg-sky-500/25 border-sky-400/50 text-sky-200',
+                3: 'bg-emerald-500/25 border-emerald-400/50 text-emerald-200'
+            };
+
+            indivEl.innerHTML = values.map((v, idx) => `
+                <div class="px-3 py-1 rounded-xl border font-bold text-xs sm:text-sm flex items-center gap-1.5 ${badgeColors[v]} animate-pop" style="animation-delay: ${idx * 50}ms">
+                    <span class="opacity-70 text-[10px]">#${idx + 1}</span>
+                    <span class="text-base font-black">${v}</span>
+                </div>
+            `).join('');
+        }
+
+        function recordRollStats(values, sum) {
+            state.rollCount++;
+            values.forEach(v => {
+                state.stats[v] = (state.stats[v] || 0) + 1;
+            });
+
+            const totalFacesRolled = state.stats[1] + state.stats[2] + state.stats[3];
+            document.getElementById('total-dice-rolled').textContent = `총 ${totalFacesRolled}개`;
+
+            [1, 2, 3].forEach(num => {
+                const count = state.stats[num];
+                const pct = totalFacesRolled > 0 ? Math.round((count / totalFacesRolled) * 100) : 0;
+                document.getElementById(`stat-count-${num}`).textContent = `${count}회 (${pct}%)`;
+                document.getElementById(`stat-bar-${num}`).style.width = `${pct}%`;
+            });
+
+            // Prepend to history
+            const now = new Date();
+            const timeStr = now.toTimeString().slice(0, 8);
+            state.history.unshift({
+                id: state.rollCount,
+                values,
+                sum,
+                time: timeStr
+            });
+            if (state.history.length > 30) state.history.pop();
+
+            renderHistoryList();
+        }
+
+        function renderHistoryList() {
+            const listEl = document.getElementById('history-list');
+            if (state.history.length === 0) {
+                listEl.innerHTML = '<div class="text-slate-500 text-center py-6">아직 기록이 없습니다.</div>';
+                return;
+            }
+
+            listEl.innerHTML = state.history.map(item => `
+                <div class="bg-slate-800/70 border border-slate-700/60 rounded-xl px-3 py-2 flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <span class="text-[11px] font-bold text-slate-400">#${item.id}</span>
+                        <span class="font-semibold text-slate-200">[ ${item.values.join(', ')} ]</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 font-extrabold">합 ${item.sum}</span>
+                        <span class="text-[10px] text-slate-500">${item.time}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // --- Camera Orbit Controls (Mouse & Touch) ---
+        function updateCameraPosition() {
+            // Smooth interpolation
+            camControl.theta += (camControl.targetTheta - camControl.theta) * 0.14;
+            camControl.phi += (camControl.targetPhi - camControl.phi) * 0.14;
+
+            const x = camControl.radius * Math.sin(camControl.phi) * Math.sin(camControl.theta);
+            const y = camControl.radius * Math.cos(camControl.phi);
+            const z = camControl.radius * Math.sin(camControl.phi) * Math.cos(camControl.theta);
+
+            camera.position.set(x, y, z);
+            camera.lookAt(0, 0.5, 0);
+        }
+
+        function setupInteractionEvents(container) {
+            // Mouse Events
+            container.addEventListener('mousedown', (e) => {
+                camControl.isDragging = true;
+                camControl.prevX = e.clientX;
+                camControl.prevY = e.clientY;
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (!camControl.isDragging) return;
+                const dx = e.clientX - camControl.prevX;
+                const dy = e.clientY - camControl.prevY;
+                camControl.prevX = e.clientX;
+                camControl.prevY = e.clientY;
+
+                camControl.targetTheta -= dx * 0.007;
+                camControl.targetPhi = Math.max(0.25, Math.min(1.32, camControl.targetPhi - dy * 0.006));
+            });
+
+            window.addEventListener('mouseup', () => {
+                camControl.isDragging = false;
+            });
+
+            // Mouse Wheel Zoom
+            container.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                camControl.radius = Math.max(11, Math.min(26, camControl.radius + e.deltaY * 0.01));
+            }, { passive: false });
+
+            // Touch Events for Mobile Orbit
+            container.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 1) {
+                    camControl.isDragging = true;
+                    camControl.prevX = e.touches[0].clientX;
+                    camControl.prevY = e.touches[0].clientY;
+                }
+            }, { passive: true });
+
+            window.addEventListener('touchmove', (e) => {
+                if (!camControl.isDragging || e.touches.length !== 1) return;
+                const dx = e.touches[0].clientX - camControl.prevX;
+                const dy = e.touches[0].clientY - camControl.prevY;
+                camControl.prevX = e.touches[0].clientX;
+                camControl.prevY = e.touches[0].clientY;
+
+                camControl.targetTheta -= dx * 0.007;
+                camControl.targetPhi = Math.max(0.25, Math.min(1.32, camControl.targetPhi - dy * 0.006));
+            }, { passive: true });
+
+            window.addEventListener('touchend', () => {
+                camControl.isDragging = false;
+            });
+        }
+
+        function onWindowResize() {
+            if (!camera || !renderer) return;
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- Main Animation Loop ---
+        let lastFrameTime = performance.now();
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const now = performance.now();
+            const dt = Math.min((now - lastFrameTime) / 1000, 0.1);
+            lastFrameTime = now;
+
+            // Step physics world
+            if (world) {
+                world.step(1 / 60, dt, 3);
+
+                // Sync Three.js meshes with Cannon.js bodies
+                for (let i = 0; i < diceObjects.length; i++) {
+                    const obj = diceObjects[i];
+                    obj.mesh.position.copy(obj.body.position);
+                    obj.mesh.quaternion.copy(obj.body.quaternion);
+                }
+
+                checkDiceSettled();
+            }
+
+            updateCameraPosition();
+            renderer.render(scene, camera);
+        }
+
+        // --- UI Controls Binding ---
+        function setupUI() {
+            // Roll Button
+            document.getElementById('roll-btn').addEventListener('click', rollDice);
+
+            // Spacebar Shortcut
+            window.addEventListener('keydown', (e) => {
+                if (e.code === 'Space' && !state.isRolling) {
+                    e.preventDefault();
+                    rollDice();
+                }
+            });
+
+            // Dice Count Selector Buttons
+            const countBtns = document.querySelectorAll('.dice-count-btn');
+            countBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    if (state.isRolling) return;
+                    const count = parseInt(btn.getAttribute('data-count'), 10);
+                    state.diceCount = count;
+
+                    countBtns.forEach(b => {
+                        b.className = 'dice-count-btn w-9 h-9 rounded-xl font-extrabold text-sm transition text-slate-400 hover:text-white hover:bg-slate-800';
+                    });
+                    btn.className = 'dice-count-btn w-9 h-9 rounded-xl font-extrabold text-sm transition bg-indigo-600 text-white shadow';
+
+                    spawnDice(count);
+                    rollDice();
+                });
+            });
+
+            // Face Mode Toggle (Pips vs Numbers)
+            document.getElementById('style-toggle-btn').addEventListener('click', () => {
+                state.faceMode = state.faceMode === 'pips' ? 'numbers' : 'pips';
+                const label = document.getElementById('style-label');
+                const icon = document.getElementById('style-icon');
+                if (state.faceMode === 'pips') {
+                    label.textContent = '점(Pip) 모드';
+                    icon.className = 'fa-solid fa-circle-dot text-rose-400';
+                } else {
+                    label.textContent = '숫자(1·2·3) 모드';
+                    icon.className = 'fa-solid fa-hashtag text-sky-400';
+                }
+                buildDiceMaterials();
+            });
+
+            // Theme Toggle
+            document.getElementById('theme-toggle-btn').addEventListener('click', () => {
+                state.themeIndex = (state.themeIndex + 1) % THEMES.length;
+                document.getElementById('theme-label').textContent = THEMES[state.themeIndex].name;
+                buildDiceMaterials();
+            });
+
+            // Sound Toggle
+            document.getElementById('sound-toggle-btn').addEventListener('click', () => {
+                state.soundEnabled = !state.soundEnabled;
+                const icon = document.getElementById('sound-icon');
+                if (state.soundEnabled) {
+                    icon.className = 'fa-solid fa-volume-high text-emerald-400';
+                    initAudio();
+                    playHitSound(4);
+                } else {
+                    icon.className = 'fa-solid fa-volume-xmark text-slate-500';
+                }
+            });
+
+            // Stats Drawer Toggle
+            const statsPanel = document.getElementById('stats-panel');
+            const toggleStats = () => {
+                const isHidden = statsPanel.classList.contains('translate-x-[120%]');
+                if (isHidden) {
+                    statsPanel.classList.remove('translate-x-[120%]', 'opacity-0', 'pointer-events-none');
+                    statsPanel.classList.add('translate-x-0', 'opacity-100', 'pointer-events-auto');
+                } else {
+                    statsPanel.classList.add('translate-x-[120%]', 'opacity-0', 'pointer-events-none');
+                    statsPanel.classList.remove('translate-x-0', 'opacity-100', 'pointer-events-auto');
+                }
+            };
+            document.getElementById('stats-toggle-btn').addEventListener('click', toggleStats);
+            document.getElementById('close-stats-btn').addEventListener('click', toggleStats);
+
+            // Clear History
+            document.getElementById('clear-history-btn').addEventListener('click', () => {
+                state.rollCount = 0;
+                state.stats = { 1: 0, 2: 0, 3: 0 };
+                state.history = [];
+                document.getElementById('total-dice-rolled').textContent = '총 0회';
+                [1, 2, 3].forEach(num => {
+                    document.getElementById(`stat-count-${num}`).textContent = '0회 (0%)';
+                    document.getElementById(`stat-bar-${num}`).style.width = '0%';
+                });
+                renderHistoryList();
+            });
+
+            // Reset Camera Angle
+            document.getElementById('reset-cam-btn').addEventListener('click', () => {
+                camControl.targetTheta = 0;
+                camControl.targetPhi = 0.92;
+                camControl.radius = 17.5;
+            });
+
+            // Download Standalone index.html File
+            document.getElementById('download-html-btn').addEventListener('click', () => {
+                const clone = document.documentElement.cloneNode(true);
+                const canvasContainer = clone.querySelector('#canvas-container');
+                if (canvasContainer) canvasContainer.innerHTML = '';
+
+                // Reset initial banner state in downloaded file
+                const statusEl = clone.querySelector('#result-status');
+                const totalEl = clone.querySelector('#result-total');
+                const unitEl = clone.querySelector('#result-unit');
+                const indivEl = clone.querySelector('#individual-results');
+                if (statusEl) statusEl.textContent = '주사위 결과';
+                if (totalEl) totalEl.textContent = '?';
+                if (unitEl) unitEl.classList.add('hidden');
+                if (indivEl) {
+                    indivEl.innerHTML = '<span class="text-xs text-slate-400">아래 버튼을 눌러 주사위를 굴려보세요!</span>';
+                }
+
+                const htmlContent = '<!DOCTYPE html>\n' + clone.outerHTML;
+                const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'index.html';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            });
+        }
+
+        // Start App on Window Load
+        window.onload = function () {
+            init3D();
+            setupUI();
+            animate();
+        };
+    </script>
+</body>
+</html>
